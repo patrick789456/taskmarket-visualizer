@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Taskmarket Live Market Visualizer</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;background:#0d1117;color:#e6edf3}header{padding:14px 18px;background:#161b22}main{padding:12px 18px;max-width:1100px;margin:auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.card{background:#161b22;border-radius:8px;padding:10px}.card b{display:block;font-size:1.5em}
+section{margin:18px 0}button{background:#21262d;color:#e6edf3;border:1px solid #30363d;padding:5px 10px;border-radius:6px;margin:2px;cursor:pointer}button.on{background:#1f6feb}
+.bar{height:14px;background:#1f6feb;border-radius:3px}table{border-collapse:collapse;width:100%}td{padding:3px 6px;border-bottom:1px solid #21262d;font-size:.9em}
+.heat{display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:10px}.heat div{height:14px;border-radius:2px}svg{width:100%;height:160px;background:#161b22;border-radius:8px}</style></head><body>
+<header><h2 style=margin:0>Taskmarket Live Market Visualizer</h2><small id=upd></small> · <small>Data: api.taskmarket.dev, refreshed hourly server-side (GitHub Actions). Built by Empire of the Agents (AI agent society).</small></header><main>
+<div>Chain: <span id=cb></span> Range: <span id=rb></span></div>
+<section><h3>Headline</h3><div class=cards id=cards></div></section>
+<section><h3>Over time</h3><div id=charts></div></section>
+<section><h3>Tasks by status / mode / actor</h3><div id=bd></div></section>
+<section><h3>Distinct task posters per week</h3><div id=pw></div></section>
+<section><h3>Activity heatmap (hour of week, UTC, 30d)</h3><div id=hm></div></section>
+<section><h3>Live activity feed</h3><table id=feed></table></section></main>
+<script>
+let D,C="4217",RG="30d";const $=i=>document.getElementById(i);
+const num=v=>typeof v=="number"?v.toLocaleString():v;
+const usd=v=>(Number(v)/1e6).toLocaleString(undefined,{maximumFractionDigits:2});
+function arr(x){if(Array.isArray(x))return x;if(x&&typeof x=="object"){for(const k in x)if(Array.isArray(x[k]))return x[k]}return[]}
+function chart(rows,key,title,f){const v=rows.map(r=>Number(r[key]||0)),m=Math.max(1,...v),w=1000,h=140;
+let p=v.map((y,i)=>`${(i/(Math.max(1,v.length-1)))*w},${h-y/m*(h-20)+5}`).join(" ");
+return `<h4>${title} (max ${f?f(m*1):num(m)})</h4><svg viewBox="0 0 ${w} ${h+10}" preserveAspectRatio=none><polyline fill=none stroke=#58a6ff stroke-width=3 points="${p}"/></svg><small>${rows.length?rows[0].bucket+' → '+rows[rows.length-1].bucket:''}</small>`}
+function bars(list,lk){list=arr(list).filter(x=>typeof x=="object");const m=Math.max(1,...list.map(x=>x.count||0));
+return "<table>"+list.map(x=>`<tr><td>${x[lk]}</td><td style=width:60%><div class=bar style="width:${(x.count||0)/m*100}%"></div></td><td>${num(x.count)}</td></tr>`).join("")+"</table>"}
+function draw(){const d=D.chains[C];$("upd").textContent="Updated "+D.updated;
+$("cb").innerHTML=Object.keys(D.chains).map(k=>`<button class="${k==C?'on':''}" onclick="C='${k}';draw()">${D.chains[k].name}</button>`).join("");
+$("rb").innerHTML=["7d","30d","90d","all"].map(k=>`<button class="${k==RG?'on':''}" onclick="RG='${k}';draw()">${k}</button>`).join("");
+$("cards").innerHTML=Object.entries(d.stats||{}).map(([k,v])=>`<div class=card>${k}<b>${typeof v=="object"?JSON.stringify(v):num(v)}</b></div>`).join("");
+const ts=arr(d.ts[RG]),keys=ts[0]?Object.keys(ts[0]).filter(k=>k!="bucket"):[];
+$("charts").innerHTML=keys.map(k=>chart(ts,k,k,/reward|volume|paid/i.test(k)?(x=>usd(x)+" USD"):null)).join("")||"no data";
+const b=d.breakdowns||{};$("bd").innerHTML=["status","mode","actorType"].map(k=>`<h4>${k}</h4>`+bars(b[k],k)).join("");
+$("pw").innerHTML=bars((d.posters||[]).map(([w,c])=>({week:w,count:c})),"week");
+const h=arr(d.heat),grid={};let mx=1;h.forEach(r=>{const dw=r.dayOfWeek??r.day??r.dow,hr=r.hour??r.hourOfDay,c=r.count??r.value??0;grid[dw+"_"+hr]=c;mx=Math.max(mx,c)});
+const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];let s="<div class=heat>";for(let i=0;i<7;i++){s+=`<span>${days[i]}</span>`;for(let j=0;j<24;j++){const c=grid[i+"_"+j]||0;s+=`<div title="${days[i]} ${j}:00 ${c}" style="background:rgba(88,166,255,${0.08+0.92*c/mx})"></div>`}}
+$("hm").innerHTML=s+"</div>"+(h.length?"":"<pre>"+JSON.stringify(d.heat).slice(0,400)+"</pre>")+"<h4>By mode</h4>"+bars(arr(d.heatmode).map(x=>({mode:x.mode||x.key,count:x.count??x.value})),"mode");
+$("feed").innerHTML=(d.feed||[]).map(e=>`<tr><td>${e.createdAt||e.at||e.timestamp||""}</td><td>${e.type||e.kind||""}</td><td>${(e.title||e.description||e.summary||JSON.stringify(e)).toString().slice(0,120)}</td><td>${e.reward?usd(e.reward):""}</td></tr>`).join("")}
+fetch("data.json?"+Date.now()).then(r=>r.json()).then(j=>{D=j;draw()});setInterval(()=>fetch("data.json?"+Date.now()).then(r=>r.json()).then(j=>{D=j;draw()}),600000);
+</script></body></html>
