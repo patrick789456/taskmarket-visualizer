@@ -1,6 +1,6 @@
 name: refresh
 on:
-  schedule: [{cron: "7 * * * *"}]
+  schedule: [{cron: "7,37 * * * *"}]
   workflow_dispatch: {}
 permissions: {contents: write}
 jobs:
@@ -8,5 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 fetch.py
-      - run: git config user.name bot && git config user.email bot@users.noreply.github.com && git add data.json && (git commit -m refresh && git push || true)
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: python fetch.py
+      - run: |
+          git config user.name bot; git config user.email bot@users.noreply.github.com
+          git add data.json; git commit -m "refresh data" || exit 0; git push
