@@ -1,33 +1,39 @@
-import json,urllib.request,datetime,collections
+
+import json,urllib.request,time,datetime
 B="https://api.taskmarket.dev/api"
 def g(p):
-    try:
-        r=urllib.request.Request(B+p,headers={"User-Agent":"tm-visualizer","Accept":"application/json"})
-        return json.loads(urllib.request.urlopen(r,timeout=60).read())
-    except Exception as e: return {"error":str(e)}
-def lst(x):
-    if isinstance(x,list): return x
-    if isinstance(x,dict):
-        for k in("tasks","items","data","results","events","feed"):
-            if isinstance(x.get(k),list): return x[k]
-    return []
-out={"updated":datetime.datetime.utcnow().isoformat()+"Z","chains":{}}
-for c,n in((4217,"Tempo"),(8453,"Base")):
-    d={"name":n,"stats":g(f"/market/stats?chainId={c}"),"breakdowns":g(f"/stats/breakdowns?chainId={c}"),"ts":{}}
-    for rg in("7d","30d","90d","all"): d["ts"][rg]=g(f"/stats/platform-time-series?chainId={c}&range={rg}&bucket=day")
-    d["heat"]=g(f"/stats/activity-heatmap?chainId={c}&range=30d&dimension=hourOfWeek")
-    d["heatmode"]=g(f"/stats/activity-heatmap?chainId={c}&range=30d&dimension=mode")
-    d["feed"]=lst(g(f"/stats/activity-feed?chainId={c}&limit=30"))[:30]
-    wk=collections.defaultdict(set);cur=None
-    for _ in range(30):
-        x=g(f"/tasks?chainId={c}&limit=100"+(f"&cursor={cur}" if cur else ""));L=lst(x)
-        for t in L:
-            try:
-                dt=datetime.datetime.fromisoformat(t["createdAt"].replace("Z","+00:00"));w=(dt-datetime.timedelta(days=dt.weekday())).date().isoformat()
-                wk[w].add(t.get("requester"))
-            except Exception: pass
-        cur=x.get("nextCursor") or x.get("cursor") if isinstance(x,dict) else None
-        if not cur or not L: break
-    d["posters"]=sorted([[k,len(v)] for k,v in wk.items()])
-    out["chains"][str(c)]=d
-json.dump(out,open("data.json","w"))
+    for i in range(3):
+        try:
+            r=urllib.request.Request(B+p,headers={"User-Agent":"tm-visualizer/1.0","Accept":"application/json"})
+            return json.loads(urllib.request.urlopen(r,timeout=60).read())
+        except Exception as e: err=str(e); time.sleep(2)
+    return {"error":err}
+def tasks(cid):
+    out=[];cur=None
+    for _ in range(40):
+        q=f"/tasks?chainId={cid}&limit=100"+(f"&cursor={cur}" if cur else "")
+        d=g(q)
+        items=d if isinstance(d,list) else (d.get("tasks") or d.get("items") or d.get("data") or [])
+        for t in items: out.append({k:t.get(k) for k in ("requester","createdAt","status","mode","reward")})
+        cur=None if isinstance(d,list) else (d.get("nextCursor") or d.get("cursor") or (d.get("pagination") or {}).get("nextCursor"))
+        if not cur or not items: break
+    return out
+def weekly(ts):
+    w={}
+    for t in ts:
+        try: d=datetime.date.fromisoformat((t["createdAt"] or "")[:10])
+        except Exception: continue
+        k=(d-datetime.timedelta(days=d.weekday())).isoformat()
+        w.setdefault(k,set()).add((t.get("requester") or "").lower())
+    return [{"week":k,"posters":len(v)} for k,v in sorted(w.items())]
+D={"generatedAt":datetime.datetime.utcnow().isoformat()+"Z","chains":{}}
+for cid in (4217,8453):
+    c={"stats":g(f"/market/stats?chainId={cid}"),"breakdowns":g(f"/stats/breakdowns?chainId={cid}"),
+       "heatmap":g(f"/stats/activity-heatmap?chainId={cid}&range=30d&dimension=hourOfWeek"),
+       "feed":g(f"/stats/activity-feed?chainId={cid}&limit=30"),"series":{}}
+    for rg in ("7d","30d","90d","all"):
+        c["series"][rg]=g(f"/stats/platform-time-series?chainId={cid}&range={rg}&bucket={'week' if rg in ('90d','all') else 'day'}")
+    ts=tasks(cid); c["taskCount"]=len(ts); c["postersWeekly"]=weekly(ts)
+    D["chains"][str(cid)]=c
+json.dump(D,open("data.json","w"),separators=(",",":"))
+print("ok",{k:v["taskCount"] for k,v in D["chains"].items()})
